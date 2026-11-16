@@ -1,8 +1,12 @@
+
+"""Page Object for Toolshop Home Page."""
+
 import re
 
 from pages.base_page import BasePage
 
-# PROD loads the grid with "QUERY /products", BUGGY with "GET /products?...". Not /products/search.
+
+# Match product list API, but not /products/search
 PRODUCT_LIST = re.compile(r"/products(\?.*)?$")
 
 
@@ -11,61 +15,135 @@ class HomePage(BasePage):
 
     def __init__(self, page):
         super().__init__(page)
+
+        # --------------------------------------------------
+        # Search
+        # --------------------------------------------------
         self.search_box = page.get_by_test_id("search-query")
-        self.search_result_count = page.get_by_test_id("search-result-count")
-        # TODO B1.1: search_button, search_caption, search_completed, product_names
+        self.search_result_count = page.get_by_test_id(
+            "search-result-count"
+        )
         self.search_button = page.get_by_test_id("search-submit")
         self.search_caption = page.get_by_test_id("search-caption")
         self.search_completed = page.get_by_test_id("search_completed")
+
+        # --------------------------------------------------
+        # Products
+        # --------------------------------------------------
         self.product_names = page.get_by_test_id("product-name")
-        # TODO B1.2: no_results
-        self.no_results = page.get_by_test_id("no-results")
-        # TODO B1.7: sort_select, product_prices
-        self.sort_select = page.get_by_test_id("sort")
-        self.sorting_completed = page.get_by_test_id("sorting_completed")
         self.product_prices = page.get_by_test_id("product-price")
-        # TODO B2/B4 (later): price_slider_max = page.get_by_role("slider").nth(1)
 
+        # --------------------------------------------------
+        # Empty results
+        # --------------------------------------------------
+        self.no_results = page.get_by_test_id("no-results")
+
+        # --------------------------------------------------
+        # Sorting
+        # --------------------------------------------------
+        self.sort_select = page.get_by_test_id("sort")
+        self.sorting_completed = page.get_by_test_id(
+            "sorting_completed"
+        )
+
+        # --------------------------------------------------
+        # Hammer category filter
+        # --------------------------------------------------
+        self.hammer_checkbox = page.get_by_role(
+            "checkbox",
+            name="Hammer",
+            exact=True
+        )
+
+        self.non_hammer_products = self.product_names.filter(
+            has_not_text=re.compile("hammer", re.IGNORECASE)
+        )
+
+    # ------------------------------------------------------
+    # Open Home Page
+    # ------------------------------------------------------
     def open(self):
-        """Return only after the first product list has arrived.
+        """Open homepage and wait for initial product response."""
 
-        Race in Toolshop: if you search before the initial list arrives, the late initial list
-        overwrites the search results. Waiting for that response is synchronisation, not an assertion.
-        """
-        with self.page.expect_response(lambda r: PRODUCT_LIST.search(r.url) is not None):
+        with self.page.expect_response(
+            lambda response: PRODUCT_LIST.search(response.url) is not None
+        ):
             super().open()
+
         return self
 
+    # ------------------------------------------------------
+    # Search Products
+    # ------------------------------------------------------
     def search(self, keyword: str):
+        """Search products by keyword."""
+
         self.search_box.fill(keyword)
         self.search_button.click()
+
         return self
 
+    # ------------------------------------------------------
+    # Sort Products
+    # ------------------------------------------------------
     def sort_by(self, value: str):
-        """value: name,asc | name,desc | price,asc | price,desc"""
-        # TODO B1.7
-        raise NotImplementedError("B1.7")
+        """Sort products: name,asc | name,desc | price,asc | price,desc."""
 
+        self.sort_select.select_option(value)
+
+        return self
+
+    # ------------------------------------------------------
+    # Filter Hammer Category
+    # ------------------------------------------------------
+    def filter_hammer(self):
+        """Filter products by Hammer category."""
+
+        with self.page.expect_response(
+            lambda response: (
+                PRODUCT_LIST.search(response.url) is not None
+                and response.status == 200
+            )
+        ):
+            self.hammer_checkbox.check()
+
+        return self
+
+    # ------------------------------------------------------
+    # Find Product Card
+    # ------------------------------------------------------
     def product_card(self, name: str):
-        # Exact name match: "Pliers" must not match "Combination Pliers".
-        return self.product_names.filter(has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
+        """Find a product by its exact name."""
 
+        return self.product_names.filter(
+            has_text=re.compile(
+                rf"^\s*{re.escape(name)}\s*$"
+            )
+        )
+
+    # ------------------------------------------------------
+    # Open Product Detail
+    # ------------------------------------------------------
     def open_product(self, name: str):
+        """Open product detail page."""
+
         from pages.product_page import ProductPage
 
-        # TODO B1.3: click the card of that product, return a ProductPage
         self.product_card(name).click()
+
         return ProductPage(self.page)
 
+    # ------------------------------------------------------
+    # Get Product Prices
+    # ------------------------------------------------------
     def prices(self) -> list[float]:
-        return [float(p.replace("$", "")) for p in self.product_prices.all_inner_texts()]
+        """Return displayed product prices as floats."""
 
-    def sort_by(self, value: str):
-        self.sort_select.select_option(value)
-        return self
-
-    def prices(self):
         return [
-            float(text.replace("$", "").replace(",", "").strip())
+            float(
+                text.replace("$", "")
+                    .replace(",", "")
+                    .strip()
+            )
             for text in self.product_prices.all_inner_texts()
         ]
