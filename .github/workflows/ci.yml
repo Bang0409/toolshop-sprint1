@@ -1,0 +1,75 @@
+
+name: CI
+
+# Chay khi push main, tao/cap nhat PR, hoac chay thu cong
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Toolshop chay cuc bo trong Docker tren GitHub Actions
+  BASE_URL: http://localhost:4200
+  API_URL: http://localhost:8091
+  GITHUB_API_URL: https://api.github.com
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  test:
+    name: test (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      # 1. Lay ma nguon
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Khoi dong Toolshop bang Docker
+      - name: Start Toolshop containers
+        run: docker compose -f toolshop/docker-compose.yml up -d
+
+      # 3. Cai Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 4. Cai thu vien kiem thu
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 5. Cai trinh duyet Playwright
+      - name: Install browser
+        run: playwright install --with-deps ${{ matrix.browser }}
+
+      # 6. Cho Toolshop san sang va nap du lieu mau
+      - name: Wait for Toolshop and load seed data
+        run: bash toolshop/start.sh
+
+      # 7. Chay toan bo test va xuat bao cao
+      - name: Run tests
+        run: >
+          pytest --browser ${{ matrix.browser }}
+          -n 2 --reruns 1
+          --tracing retain-on-failure
+          --screenshot only-on-failure
+          --html=report.html
+          --self-contained-html
+
+      # 8. Luu bao cao va trace cho tung trinh duyet
+      - name: Upload report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.browser }}
+          path: |
+            report.html
+            test-results/
+          retention-days: 7
